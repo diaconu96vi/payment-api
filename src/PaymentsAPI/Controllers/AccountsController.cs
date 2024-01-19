@@ -1,5 +1,8 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using PaymentsAPI.Services.Payments;
+using PaymentsAPI.Services.Transactions;
+using System.Transactions;
 
 namespace PaymentsAPI.Controllers
 {
@@ -7,36 +10,44 @@ namespace PaymentsAPI.Controllers
     [ApiController]
     public class AccountsController : ControllerBase
     {
+        private readonly IConcurrencyChecker _concurrencyChecker;
+        private readonly ITransactionService _transactionService;
         private readonly ILogger<AccountsController> _logger;
 
-        public AccountsController(ILogger<AccountsController> logger)
+        public AccountsController(IConcurrencyChecker concurrencyChecker, ITransactionService transactionService, ILogger<AccountsController> logger)
         {
+            _concurrencyChecker = concurrencyChecker ?? throw new ArgumentNullException(nameof(concurrencyChecker));
+            _transactionService = transactionService ?? throw new ArgumentNullException(nameof(transactionService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         [HttpGet("{iban}/transactions")]
         [ProducesResponseType(StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
-        public IActionResult GetTransactions(string iban)
+        public async Task<IActionResult> GetTransactions(string iban)
         {
             if(string.IsNullOrWhiteSpace(iban))
             {
-                return BadRequest("IBAN cannot be null");
+                _logger.LogError("IBAN cannot be null");
+                return BadRequest();
             }
 
-            var list = new List<object>
+            try
             {
-                new { Id = "1", Debtor = "Debtor1", Creditor = "Creditor1", Amount = 100.00, Currency = "EUR" },
-                new { Id = "2", Debtor = "Debtor2", Creditor = "Creditor2", Amount = 200.00, Currency = "USD" },
-                new { Id = "3", Debtor = "Debtor3", Creditor = "Creditor3", Amount = 300.00, Currency = "GBP" }
-            };
+                var transactions = await _transactionService.GetTransactionsAsync(iban);
 
-            if(list?.Count == 0)
-            {
+                if (transactions?.Count() > 0)
+                {
+                    return Ok(transactions);
+                }
+
                 return NoContent();
             }
-
-            return Ok(list);
+            catch(Exception ex)
+            {
+                _logger.LogError(ex, "Could not get transactions");
+                return BadRequest();
+            }
         }
     }
 }
